@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+bcrypt
+python-jose[cryptography]
+pydantic[email]
+pydantic-settings
+google-auth
+requests
+pandas
+openpyxl
+python-multipart
