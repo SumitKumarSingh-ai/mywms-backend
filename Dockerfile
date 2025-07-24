@@ -17,3 +17,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # The command to run the app is specified in docker-compose.yml
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "10000"]
