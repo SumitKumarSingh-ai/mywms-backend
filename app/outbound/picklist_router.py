@@ -6,7 +6,7 @@ from datetime import datetime, date, timezone
 
 from . import picklist_schemas
 from app.inventory import inventory_models
-from app.auth.dependencies import require_role, get_db
+from app.auth.dependencies import require_role, get_db, get_current_user
 from app.auth.auth_models import User
 
 router = APIRouter(
@@ -14,26 +14,20 @@ router = APIRouter(
 )
 
 def calculate_shelf_life_percentage(mfg_date, exp_date):
-    if not mfg_date or not exp_date:
-        return 0
+    if not mfg_date or not exp_date: return 0
     today = date.today()
-    if today > exp_date:
-        return 0
+    if today > exp_date: return 0
     total_days = (exp_date - mfg_date).days
     remaining_days = (exp_date - today).days
-    if total_days <= 0:
-        return 0
+    if total_days <= 0: return 0
     return round((remaining_days / total_days) * 100)
 
 @router.get("/picklists/{picklist_id}", response_model=picklist_schemas.PickList)
 def get_picklist_details(
     picklist_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin", "manager", "supervisor", "operator"]))
+    current_user: User = Depends(get_current_user)
 ):
-    """
-    Get a single Pick List by its ID, including all related data.
-    """
     picklist = db.query(inventory_models.PickList).options(
         selectinload(inventory_models.PickList.items)
         .joinedload(inventory_models.PickListItem.product),
@@ -42,26 +36,19 @@ def get_picklist_details(
         selectinload(inventory_models.PickList.items)
         .joinedload(inventory_models.PickListItem.inventory)
     ).filter(inventory_models.PickList.id == picklist_id).first()
-
     if not picklist:
         raise HTTPException(status_code=404, detail="Pick List not found")
-    
-    # Manually populate date fields for the schema from the joined inventory record
     for item in picklist.items:
         if item.inventory:
             item.mfg_date = item.inventory.mfg_date
             item.exp_date = item.inventory.exp_date
-
     return picklist
 
 @router.get("/picklists/", response_model=List[picklist_schemas.PickList])
 def get_all_picklists(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin", "manager", "supervisor"]))
+    current_user: User = Depends(get_current_user)
 ):
-    """
-    Get all PENDING pick lists, including their items.
-    """
     return db.query(inventory_models.PickList).options(
         selectinload(inventory_models.PickList.items)
     ).filter(
@@ -169,12 +156,13 @@ def execute_pick_item(
     if not pick_item.inventory:
         raise HTTPException(status_code=400, detail="Cannot pick item with no allocated inventory.")
 
-    # Update inventory
     inventory_record = pick_item.inventory
     inventory_record.quantity -= pick_item.allocated_quantity
     inventory_record.reserved_quantity -= pick_item.allocated_quantity
+    
+    if inventory_record.quantity <= 0:
+        db.delete(inventory_record)
 
-    # Update pick item with user and time
     pick_item.picked_quantity = pick_item.allocated_quantity
     pick_item.status = inventory_models.PickListItemStatus.PICKED
     pick_item.picked_by_user_id = current_user.id
@@ -182,7 +170,6 @@ def execute_pick_item(
     
     db.commit()
 
-    # Check if the parent picklist is now fully picked
     parent_picklist = pick_item.picklist
     all_items_picked = all(
         item.status == inventory_models.PickListItemStatus.PICKED for item in parent_picklist.items
