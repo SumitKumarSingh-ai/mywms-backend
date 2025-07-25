@@ -80,7 +80,7 @@ class Inventory(Base):
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
     product = relationship("Product", back_populates="inventory_items")
     location = relationship("Location", back_populates="inventory_items")
-    __table_args__ = (UniqueConstraint('product_id', 'location_id', 'batch', name='_inventory_uc'),)
+    __table_args__ = (UniqueConstraint('product_id', 'location_id', 'batch', 'mfg_date', name='_inventory_uc'),)
 
 class GoodsReceipt(Base):
     __tablename__ = "goods_receipts"
@@ -100,11 +100,9 @@ class GoodsReceiptItem(Base):
     putaway_quantity = Column(Float, default=0.0, nullable=False)
     batch = Column(String, nullable=True)
     status = Column(Enum(GRNItemStatus, native_enum=False), default=GRNItemStatus.PENDING)
-    # putaway_by and putaway_at are removed
     goods_receipt = relationship("GoodsReceipt", back_populates="items")
     product = relationship("Product")
 
-# --- NEW TABLE for Putaway Transactions ---
 class PutawayLog(Base):
     __tablename__ = "putaway_log"
     id = Column(Integer, primary_key=True, index=True)
@@ -113,7 +111,6 @@ class PutawayLog(Base):
     quantity = Column(Float, nullable=False)
     putaway_by_user_id = Column(Integer, ForeignKey("users.id"))
     putaway_at = Column(DateTime(timezone=True), server_default=func.now())
-    # --- ADD THESE TWO LINES ---
     goods_receipt_item = relationship("GoodsReceiptItem")
     inventory = relationship("Inventory")
 
@@ -132,17 +129,15 @@ class PickListItem(Base):
     picklist_id = Column(Integer, ForeignKey("pick_lists.id"))
     product_id = Column(Integer, ForeignKey("products.id"))
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
-    inventory_id = Column(Integer, ForeignKey("inventory.id"), nullable=True)
     required_quantity = Column(Float, nullable=False)
     allocated_quantity = Column(Float, nullable=False)
     picked_quantity = Column(Float, default=0.0)
     batch = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     status = Column(Enum(PickListItemStatus, native_enum=False), default=PickListItemStatus.PENDING)
-    picked_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True) # <-- ADD THIS
-    picked_at = Column(DateTime(timezone=True), nullable=True) # <-- ADD THIS
+    picked_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    picked_at = Column(DateTime(timezone=True), nullable=True)
     
     picklist = relationship("PickList", back_populates="items")
     product = relationship("Product")
     location = relationship("Location")
-    inventory = relationship("Inventory")
