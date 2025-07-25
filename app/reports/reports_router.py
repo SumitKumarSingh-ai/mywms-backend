@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from datetime import date
 
@@ -21,7 +21,7 @@ def calculate_shelf_life_percentage(mfg_date, exp_date):
     return round((remaining_days / total_days) * 100)
 
 @router.get("/current-stock/")
-def get_current_stock_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager"]))):
+def get_current_stock_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager", "operator"]))):
     stock_data = db.query(inventory_models.Inventory).options(
         joinedload(inventory_models.Inventory.product),
         joinedload(inventory_models.Inventory.location)
@@ -38,7 +38,7 @@ def get_current_stock_report(db: Session = Depends(get_db), current_user: User =
     return report
 
 @router.get("/inward-report/")
-def get_inward_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager"]))):
+def get_inward_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager", "operator"]))):
     inward_items = db.query(inventory_models.GoodsReceiptItem).filter(
         inventory_models.GoodsReceiptItem.status == inventory_models.GRNItemStatus.PENDING
     ).options(
@@ -55,7 +55,7 @@ def get_inward_report(db: Session = Depends(get_db), current_user: User = Depend
     return report
 
 @router.get("/putaway-report/")
-def get_putaway_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager"]))):
+def get_putaway_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager", "operator"]))):
     putaway_logs = db.query(inventory_models.PutawayLog).options(
         joinedload(inventory_models.PutawayLog.goods_receipt_item).joinedload(inventory_models.GoodsReceiptItem.goods_receipt),
         joinedload(inventory_models.PutawayLog.inventory).joinedload(inventory_models.Inventory.product),
@@ -76,7 +76,7 @@ def get_putaway_report(db: Session = Depends(get_db), current_user: User = Depen
     return report
 
 @router.get("/picklist-summary/")
-def get_picklist_summary_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager"]))):
+def get_picklist_summary_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager", "operator"]))):
     pick_items = db.query(inventory_models.PickListItem).options(
         joinedload(inventory_models.PickListItem.picklist),
         joinedload(inventory_models.PickListItem.product),
@@ -84,7 +84,6 @@ def get_picklist_summary_report(db: Session = Depends(get_db), current_user: Use
     ).all()
     report = []
     for item in pick_items:
-        # Since inventory is no longer directly linked, we can't get shelf life here.
         report.append({
             "OBD No.": item.picklist.obd_number, "Customer Name": item.picklist.customer_name,
             "EAN No.": item.product.ean, "Material": item.product.material_code, "Description": item.product.name,
@@ -94,7 +93,7 @@ def get_picklist_summary_report(db: Session = Depends(get_db), current_user: Use
     return report
 
 @router.get("/picking-report/")
-def get_picking_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager"]))):
+def get_picking_report(db: Session = Depends(get_db), current_user: User = Depends(require_role(["admin", "manager", "operator"]))):
     picked_items = db.query(inventory_models.PickListItem).filter(
         inventory_models.PickListItem.status == inventory_models.PickListItemStatus.PICKED
     ).options(
@@ -104,7 +103,6 @@ def get_picking_report(db: Session = Depends(get_db), current_user: User = Depen
     ).all()
     report = []
     for item in picked_items:
-        # Since inventory is no longer directly linked, we can't get shelf life here.
         report.append({
             "OBD No.": item.picklist.obd_number, "EAN No.": item.product.ean,
             "Material": item.product.material_code, "Description": item.product.name,
