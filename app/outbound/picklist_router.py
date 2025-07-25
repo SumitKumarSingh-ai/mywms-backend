@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy import func
 from typing import List
 import pandas as pd
 from datetime import datetime, date, timezone
@@ -36,12 +37,15 @@ def get_picklist_details(
         selectinload(inventory_models.PickList.items)
         .joinedload(inventory_models.PickListItem.inventory)
     ).filter(inventory_models.PickList.id == picklist_id).first()
+
     if not picklist:
         raise HTTPException(status_code=404, detail="Pick List not found")
+
     for item in picklist.items:
         if item.inventory:
             item.mfg_date = item.inventory.mfg_date
             item.exp_date = item.inventory.exp_date
+            
     return picklist
 
 @router.get("/picklists/", response_model=List[picklist_schemas.PickList])
@@ -84,7 +88,7 @@ def upload_picklist(
 
             available_inventory = db.query(inventory_models.Inventory).filter(
                 inventory_models.Inventory.product_id == product.id,
-                inventory_models.Inventory.quantity > inventory_models.Inventory.reserved_quantity
+                inventory_models.Inventory.quantity > func.coalesce(inventory_models.Inventory.reserved_quantity, 0)
             ).all()
 
             if not available_inventory:
@@ -117,8 +121,11 @@ def upload_picklist(
                 alloc_qty = min(qty_to_allocate, available_qty)
 
                 new_picklist_item = inventory_models.PickListItem(
-                    picklist_id=picklist.id, product_id=product.id, location_id=stock.location_id,
-                    inventory_id=stock.id, required_quantity=required_qty, allocated_quantity=alloc_qty,
+                    picklist_id=picklist.id,
+                    product_id=product.id,
+                    location_id=stock.location_id,
+                    required_quantity=required_qty,
+                    allocated_quantity=alloc_qty,
                     batch=stock.batch
                 )
                 db.add(new_picklist_item)
@@ -144,7 +151,6 @@ def execute_pick_item(
     current_user: User = Depends(require_role(["admin", "manager", "supervisor", "operator"]))
 ):
     pick_item = db.query(inventory_models.PickListItem).options(
-        joinedload(inventory_models.PickListItem.inventory),
         joinedload(inventory_models.PickListItem.picklist)
         .selectinload(inventory_models.PickList.items)
     ).filter(inventory_models.PickListItem.id == item_id).first()
@@ -153,10 +159,18 @@ def execute_pick_item(
         raise HTTPException(status_code=404, detail="Pick list item not found.")
     if pick_item.status == inventory_models.PickListItemStatus.PICKED:
         raise HTTPException(status_code=400, detail="This item has already been picked.")
-    if not pick_item.inventory:
+    if not pick_item.location_id:
         raise HTTPException(status_code=400, detail="Cannot pick item with no allocated inventory.")
 
-    inventory_record = pick_item.inventory
+    inventory_record = db.query(inventory_models.Inventory).filter(
+        inventory_models.Inventory.product_id == pick_item.product_id,
+        inventory_models.Inventory.location_id == pick_item.location_id,
+        inventory_models.Inventory.batch == pick_item.batch
+    ).first()
+
+    if not inventory_record:
+        raise HTTPException(status_code=404, detail="Inventory to pick from does not exist.")
+
     inventory_record.quantity -= pick_item.allocated_quantity
     inventory_record.reserved_quantity -= pick_item.allocated_quantity
     
@@ -194,10 +208,12 @@ def force_close_pick_item(
     if not pick_item:
         raise HTTPException(status_code=404, detail="Pick list item not found.")
     
-    if pick_item.inventory_id is not None:
+    if pick_item.location_id is not None:
         raise HTTPException(status_code=400, detail="Cannot force close an item that has allocated stock.")
 
     pick_item.status = inventory_models.PickListItemStatus.PICKED
+    pick_item.picked_by_user_id = current_user.id
+    pick_item.picked_at = datetime.now(timezone.utc)
     db.commit()
 
     parent_picklist = pick_item.picklist
