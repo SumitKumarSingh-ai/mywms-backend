@@ -35,12 +35,21 @@ def get_picklist_details(
         selectinload(inventory_models.PickList.items)
         .joinedload(inventory_models.PickListItem.location)
     ).filter(inventory_models.PickList.id == picklist_id).first()
-
     if not picklist:
         raise HTTPException(status_code=404, detail="Pick List not found")
-
-    # This router no longer joins inventory directly, so date population is removed
-    # Dates will be handled by a dedicated inventory query if needed elsewhere
+    
+    # To get MFG/EXP dates, we now need to query the inventory table separately
+    # This keeps the models clean and avoids the foreign key issue.
+    for item in picklist.items:
+        if item.location_id and item.batch:
+            inventory_record = db.query(inventory_models.Inventory).filter(
+                inventory_models.Inventory.product_id == item.product_id,
+                inventory_models.Inventory.location_id == item.location_id,
+                inventory_models.Inventory.batch == item.batch
+            ).first()
+            if inventory_record:
+                item.mfg_date = inventory_record.mfg_date
+                item.exp_date = inventory_record.exp_date
             
     return picklist
 
@@ -63,7 +72,6 @@ def upload_picklist(
 ):
     try:
         df = pd.read_excel(file.file).fillna('')
-        
         obd_number = str(df.iloc[0]["OBD No."])
         customer_name = str(df.iloc[0]["Customer Name"])
 
@@ -77,7 +85,6 @@ def upload_picklist(
         for index, row in df.iterrows():
             ean = str(row["EAN No."])
             required_qty = float(row["Quantity"])
-            
             product = db.query(inventory_models.Product).filter(inventory_models.Product.ean == ean).first()
             if not product:
                 raise HTTPException(status_code=400, detail=f"Product with EAN {ean} not found.")
@@ -95,12 +102,7 @@ def upload_picklist(
             shelf_life_req = str(row["Shelf Life"])
             min_sl, max_sl = map(int, shelf_life_req.split('-'))
 
-            valid_stock = []
-            for stock in available_inventory:
-                sl_percent = calculate_shelf_life_percentage(stock.mfg_date, stock.exp_date)
-                if min_sl <= sl_percent <= max_sl:
-                    stock.shelf_life_percentage = sl_percent
-                    valid_stock.append(stock)
+            valid_stock = [s for s in available_inventory if min_sl <= calculate_shelf_life_percentage(s.mfg_date, s.exp_date) <= max_sl]
 
             if not valid_stock:
                 item = inventory_models.PickListItem(picklist_id=picklist.id, product_id=product.id, required_quantity=required_qty, allocated_quantity=0, notes="Low Shelf Life")
@@ -112,17 +114,12 @@ def upload_picklist(
             qty_to_allocate = required_qty
             for stock in valid_stock:
                 if qty_to_allocate <= 0: break
-                
                 available_qty = stock.quantity - stock.reserved_quantity
                 alloc_qty = min(qty_to_allocate, available_qty)
 
                 new_picklist_item = inventory_models.PickListItem(
-                    picklist_id=picklist.id,
-                    product_id=product.id,
-                    location_id=stock.location_id,
-                    required_quantity=required_qty,
-                    allocated_quantity=alloc_qty,
-                    batch=stock.batch
+                    picklist_id=picklist.id, product_id=product.id, location_id=stock.location_id,
+                    required_quantity=required_qty, allocated_quantity=alloc_qty, batch=stock.batch
                 )
                 db.add(new_picklist_item)
                 stock.reserved_quantity += alloc_qty
@@ -204,7 +201,6 @@ def force_close_pick_item(
     if not pick_item:
         raise HTTPException(status_code=404, detail="Pick list item not found.")
     
-    # This check is now based on location_id since inventory_id was removed
     if pick_item.location_id is not None:
         raise HTTPException(status_code=400, detail="Cannot force close an item that has allocated stock.")
 
