@@ -33,18 +33,14 @@ def get_picklist_details(
         selectinload(inventory_models.PickList.items)
         .joinedload(inventory_models.PickListItem.product),
         selectinload(inventory_models.PickList.items)
-        .joinedload(inventory_models.PickListItem.location),
-        selectinload(inventory_models.PickList.items)
-        .joinedload(inventory_models.PickListItem.inventory)
+        .joinedload(inventory_models.PickListItem.location)
     ).filter(inventory_models.PickList.id == picklist_id).first()
 
     if not picklist:
         raise HTTPException(status_code=404, detail="Pick List not found")
 
-    for item in picklist.items:
-        if item.inventory:
-            item.mfg_date = item.inventory.mfg_date
-            item.exp_date = item.inventory.exp_date
+    # This router no longer joins inventory directly, so date population is removed
+    # Dates will be handled by a dedicated inventory query if needed elsewhere
             
     return picklist
 
@@ -208,6 +204,7 @@ def force_close_pick_item(
     if not pick_item:
         raise HTTPException(status_code=404, detail="Pick list item not found.")
     
+    # This check is now based on location_id since inventory_id was removed
     if pick_item.location_id is not None:
         raise HTTPException(status_code=400, detail="Cannot force close an item that has allocated stock.")
 
