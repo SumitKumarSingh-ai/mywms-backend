@@ -100,6 +100,8 @@ class GoodsReceiptItem(Base):
     putaway_quantity = Column(Float, default=0.0, nullable=False)
     batch = Column(String, nullable=True)
     status = Column(Enum(GRNItemStatus, native_enum=False), default=GRNItemStatus.PENDING)
+    putaway_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    putaway_at = Column(DateTime(timezone=True), nullable=True)
     goods_receipt = relationship("GoodsReceipt", back_populates="items")
     product = relationship("Product")
 
