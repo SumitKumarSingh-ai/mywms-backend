@@ -27,8 +27,8 @@ class Product(BaseModel):
     ean: str
     material_code: str
     name: str
-    brand: BrandEnum
-    uom: UomEnum
+    brand: str # Corrected from Enum
+    uom: str   # Corrected from Enum
     mrp: float
     case_size: int
     min_qty: float
@@ -39,7 +39,7 @@ class Product(BaseModel):
 class Inventory(BaseModel):
     id: int
     quantity: float
-    reserved_quantity: float
+    reserved_quantity: float | None = None
     batch: str | None = None
     mfg_date: date | None = None
     exp_date: date | None = None

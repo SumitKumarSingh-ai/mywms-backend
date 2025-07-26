@@ -35,11 +35,10 @@ def get_picklist_details(
         selectinload(inventory_models.PickList.items)
         .joinedload(inventory_models.PickListItem.location)
     ).filter(inventory_models.PickList.id == picklist_id).first()
+
     if not picklist:
         raise HTTPException(status_code=404, detail="Pick List not found")
-    
-    # To get MFG/EXP dates, we now need to query the inventory table separately
-    # This keeps the models clean and avoids the foreign key issue.
+
     for item in picklist.items:
         if item.location_id and item.batch:
             inventory_record = db.query(inventory_models.Inventory).filter(
@@ -114,7 +113,9 @@ def upload_picklist(
             qty_to_allocate = required_qty
             for stock in valid_stock:
                 if qty_to_allocate <= 0: break
-                available_qty = stock.quantity - stock.reserved_quantity
+                
+                current_reserved = stock.reserved_quantity if stock.reserved_quantity is not None else 0
+                available_qty = stock.quantity - current_reserved
                 alloc_qty = min(qty_to_allocate, available_qty)
 
                 new_picklist_item = inventory_models.PickListItem(
@@ -122,7 +123,7 @@ def upload_picklist(
                     required_quantity=required_qty, allocated_quantity=alloc_qty, batch=stock.batch
                 )
                 db.add(new_picklist_item)
-                stock.reserved_quantity += alloc_qty
+                stock.reserved_quantity = current_reserved + alloc_qty
                 qty_to_allocate -= alloc_qty
 
             if qty_to_allocate > 0:
